@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Blasphemous
+Comment=Play this game on Steam
+Exec=steam steam://rungameid/774361
+Icon=steam_icon_774361
+Terminal=false
+Type=Application
+Categories=Game;
