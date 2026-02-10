@@ -30,13 +30,13 @@ from typing import (
     TypedDict,
     runtime_checkable,
 )
-from contextlib import suppress
+from contextlib import suppress, contextmanager
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk, Pango
+from gi.repository import Adw, GLib, Gtk, Pango, GObject
 
 import lib.utility as utility
 
@@ -194,6 +194,9 @@ class RowProperties(TypedDict, total=False):
     icon: IconConfig
     style: str
     button_text: str
+    button_text_file: str
+    button_text_map: dict[str, str]
+    style_map: dict[str, str]
     interval: int
     key: str
     key_inverse: bool
@@ -206,8 +209,10 @@ class RowProperties(TypedDict, total=False):
     default: float
     debounce: bool
     options: list[str]  # Added for SelectionRow
+    options_command: str # ADDED: Command to fetch options list
     placeholder: str    # Added for EntryRow logic
     badge_file: str     # ADDED: Path to file containing badge count
+    buttons: list[dict[str, Any]] # ADDED: Support for multiple linked buttons
 
 
 class RowContext(TypedDict, total=False):
@@ -217,6 +222,7 @@ class RowContext(TypedDict, total=False):
     toast_overlay: Adw.ToastOverlay | None
     nav_view: Adw.NavigationView | None
     builder_func: Callable[..., Adw.NavigationPage] | None
+    path: NotRequired[list[str]] # Path context for breadcrumbs
 
 
 @dataclass(slots=True)
@@ -456,7 +462,7 @@ class DynamicIconMixin:
             GLib.idle_add(self._apply_icon_update, new_icon)
 
     def _apply_icon_update(self, new_icon: str) -> bool:
-        """Apply icon update on the main thread."""
+        """Apply icon update on main thread."""
         with self._state.lock:
             if self._state.is_destroyed:
                 return GLib.SOURCE_REMOVE
@@ -729,42 +735,107 @@ class ButtonRow(BaseActionRow):
     ) -> None:
         super().__init__(properties, on_press, context)
 
-        style = str(properties.get("style", "default")).lower()
-        btn = Gtk.Button(label=str(properties.get("button_text", "Run")))
-        btn.add_css_class("run-btn")
-        btn.set_valign(Gtk.Align.CENTER)
+        # Check for multiple buttons (Linked Group)
+        multi_buttons = properties.get("buttons")
+        
+        if multi_buttons and isinstance(multi_buttons, list):
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            box.add_css_class("linked")
+            box.set_valign(Gtk.Align.CENTER)
+            
+            for btn_cfg in multi_buttons:
+                b = Gtk.Button()
+                # Use Icon if provided, otherwise fallback to Text
+                if icon_name := btn_cfg.get("icon"):
+                    b.set_child(Gtk.Image.new_from_icon_name(icon_name))
+                    b.set_tooltip_text(str(btn_cfg.get("button_text", "Action")))
+                else:
+                    b.set_label(str(btn_cfg.get("button_text", "Action")))
+                
+                b.connect("clicked", self._on_multi_clicked, btn_cfg)
+                
+                # Apply style if provided
+                if s := btn_cfg.get("style"):
+                    if s == "suggested": b.add_css_class("suggested-action")
+                    elif s == "destructive": b.add_css_class("destructive-action")
+                
+                box.append(b)
+            
+            self.add_suffix(box)
+        else:
+            # Standard single button logic
+            self.btn = Gtk.Button(label=str(properties.get("button_text", "Run")))
+            self.btn.set_valign(Gtk.Align.CENTER)
+            self.btn.add_css_class("run-btn")
+            
+            self.base_style = str(properties.get("style", "default")).lower()
+            self._apply_base_style(self.base_style)
+            
+            # Dynamic State (Text & Color) - Watches a file for status mapping
+            self.text_file = properties.get("button_text_file")
+            if self.text_file:
+                self.text_map = properties.get("button_text_map", {})
+                self.style_map = properties.get("style_map", {})
+                self._start_dynamic_poll()
 
+            self.btn.connect("clicked", self._on_button_clicked)
+            self.add_suffix(self.btn)
+            self.set_activatable_widget(self.btn)
+
+    def _apply_base_style(self, style: str) -> None:
+        for s in ["suggested-action", "destructive-action", "default-action"]:
+            self.btn.remove_css_class(s)
         match style:
-            case "destructive":
-                btn.add_css_class("destructive-action")
-            case "suggested":
-                btn.add_css_class("suggested-action")
-            case _:
-                btn.add_css_class("default-action")
+            case "destructive": self.btn.add_css_class("destructive-action")
+            case "suggested": self.btn.add_css_class("suggested-action")
+            case _: self.btn.add_css_class("default-action")
 
-        btn.connect("clicked", self._on_button_clicked)
-        self.add_suffix(btn)
-        self.set_activatable_widget(btn)
+    def _start_dynamic_poll(self) -> None:
+        self._update_dynamic_state()
+        with self._state.lock:
+            if not self._state.is_destroyed:
+                self._state.update_source_id = GLib.timeout_add_seconds(2, self._update_dynamic_state)
+
+    def _update_dynamic_state(self) -> bool:
+        try:
+            path = Path(self.text_file).expanduser()
+            if not path.exists(): return True
+            val = path.read_text().strip()
+            # Update Label
+            new_label = self.text_map.get(val, self.text_map.get("default", self.btn.get_label()))
+            if self.btn.get_label() != new_label: self.btn.set_label(new_label)
+            # Update Style
+            new_style = self.style_map.get(val, self.style_map.get("default", self.base_style))
+            self._apply_base_style(new_style)
+        except Exception: pass
+        return True
 
     def _on_button_clicked(self, _button: Gtk.Button) -> None:
-        """Handle button click: execute command or redirect."""
-        if not isinstance(self.on_action, dict):
-            return
+        """Handle standard button click."""
+        self._trigger_action(self.on_action)
 
-        match self.on_action.get("type"):
-            case "exec":
-                cmd = self.on_action.get("command", "")
-                if isinstance(cmd, str) and cmd.strip():
-                    title = str(self.properties.get("title", "Command"))
-                    term = bool(self.on_action.get("terminal", False))
-                    success = utility.execute_command(cmd.strip(), title, term)
-                    msg = f"{'▶ Launched' if success else '✖ Failed'}: {title}"
-                    utility.toast(
-                        self.toast_overlay, msg, 2 if success else 4
-                    )
-            case "redirect":
-                if pid := self.on_action.get("page"):
-                    _perform_redirect(str(pid), self.config, self.sidebar)
+    def _on_multi_clicked(self, _b: Gtk.Button, cfg: dict[str, Any]) -> None:
+        """Handle linked button click."""
+        if act := cfg.get("on_press"):
+            self._trigger_action(act)
+
+    def _trigger_action(self, act: Any) -> None:
+        """Execute action from config dict."""
+        if not isinstance(act, dict): return
+        t = act.get("type")
+        if t == "exec":
+            cmd = act.get("command", "")
+            if isinstance(cmd, str) and cmd.strip():
+                title = str(self.properties.get("title", "Command"))
+                term = bool(act.get("terminal", False))
+                success = utility.execute_command(cmd.strip(), title, term)
+                msg = f"{'▶ Launched' if success else '✖ Failed'}: {title}"
+                utility.toast(
+                    self.toast_overlay, msg, 2 if success else 4
+                )
+        elif t == "redirect":
+            if pid := act.get("page"):
+                _perform_redirect(str(pid), self.config, self.sidebar)
 
 
 class ToggleRow(StateMonitorMixin, BaseActionRow):
@@ -1132,7 +1203,7 @@ class SliderRow(SliderMonitorMixin, BaseActionRow):
 
 
 class SelectionRow(DynamicIconMixin, Adw.ComboRow):
-    """Row with a dropdown selection menu."""
+    """Row with a dropdown selection menu and state monitoring."""
 
     __gtype_name__ = "DuskySelectionRow"
 
@@ -1150,27 +1221,43 @@ class SelectionRow(DynamicIconMixin, Adw.ComboRow):
         self.on_action: ActionConfig = on_change or {}
         self.context: RowContext = context or {}
         self.toast_overlay: Adw.ToastOverlay | None = self.context.get("toast_overlay")
+        
+        self._programmatic_update = False
+        self._initial_fetch_done = False
 
-        # Independent Setup (copied logic to avoid MRO issues with BaseActionRow)
+        # Title & Subtitle
         title = str(properties.get("title", "Unnamed"))
         self.set_title(GLib.markup_escape_text(title))
         if sub := properties.get("description", ""):
             self.set_subtitle(GLib.markup_escape_text(str(sub)))
 
+        # Icon Setup
         icon_config = properties.get("icon", DEFAULT_ICON)
         self.icon_widget = self._create_icon_widget(icon_config)
         self.add_prefix(self.icon_widget)
 
-        # Selection Setup
-        options = properties.get("options", [])
-        if options and isinstance(options, list):
-            self.set_model(Gtk.StringList.new([str(x) for x in options]))
+        # Options Setup - Initialize empty, then populate
+        self.options_list: list[str] = []
+        raw_options = properties.get("options", [])
+        if isinstance(raw_options, list) and raw_options:
+            self.options_list = [str(x) for x in raw_options]
+            self.set_model(Gtk.StringList.new(self.options_list))
 
+        # Signal Connections
         self.connect("notify::selected", self._on_selected)
+        # CRITICAL FIX: Ensure fetch runs when widget becomes visible
+        self.connect("map", self._on_map)
 
-        # Start dynamic icon
+        # Start Monitors
         if _is_dynamic_icon(icon_config) and isinstance(icon_config, dict):
             self._start_icon_update_loop(icon_config)
+
+        # Handle dynamic options command
+        if properties.get("options_command"):
+            _submit_task_safe(self._fetch_options_async, self._state)
+
+        if properties.get("value_command"):
+            self._start_selection_monitor()
 
     def _create_icon_widget(self, icon: object) -> Gtk.Image:
         """Create the prefix icon widget based on configuration."""
@@ -1187,19 +1274,152 @@ class SelectionRow(DynamicIconMixin, Adw.ComboRow):
         img.add_css_class("action-row-prefix-icon")
         return img
 
-    def _on_selected(self, _row: Adw.ComboRow, _param: Any) -> None:
+    @contextmanager
+    def _suppress_change_signal(self):
+        """Context manager to safely toggle the programmatic update flag."""
+        self._programmatic_update = True
+        try:
+            yield
+        finally:
+            self._programmatic_update = False
+
+    def _fetch_options_async(self) -> None:
+        """Fetch options list from a command in the background."""
+        cmd = self.properties.get("options_command", "")
+        if not cmd:
+            return
+
+        try:
+            res = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT_LONG
+            )
+            if res.returncode == 0:
+                lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+                if lines:
+                    GLib.idle_add(self._update_options_ui, lines)
+        except Exception as e:
+            log.error(f"Options fetch failed: {e}")
+
+    def _update_options_ui(self, new_options: list[str]) -> bool:
+        """Update the dropdown model with new options."""
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+
+        # Only update if changed to avoid flicker
+        if new_options != self.options_list:
+            self.options_list = new_options
+            # Note: replacing the model resets selection to 0, monitoring will fix it shortly
+            with self._suppress_change_signal():
+                self.set_model(Gtk.StringList.new(self.options_list))
+                # Trigger immediate re-check of value to restore correct selection
+                _submit_task_safe(self._fetch_selection_async, self._state)
+
+        return GLib.SOURCE_REMOVE
+
+    def _start_selection_monitor(self) -> None:
+        """Initialize the selection polling loop."""
+        interval = _safe_int(self.properties.get("interval"), DEFAULT_INTERVAL_SECONDS)
+
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return
+            self._state.monitor_source_id = GLib.timeout_add_seconds(
+                interval, self._check_selection_tick
+            )
+
+    def _on_map(self, _widget: Gtk.Widget) -> None:
+        """Trigger an update whenever the widget becomes visible."""
+        _submit_task_safe(self._fetch_selection_async, self._state)
+        if self.properties.get("options_command"):
+             _submit_task_safe(self._fetch_options_async, self._state)
+
+    def _check_selection_tick(self) -> bool:
+        """GLib timeout to schedule background fetch."""
+        if not self.get_mapped():
+            return GLib.SOURCE_CONTINUE
+
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+
+        _submit_task_safe(self._fetch_selection_async, self._state)
+        return GLib.SOURCE_CONTINUE
+
+    def _fetch_selection_async(self) -> None:
+        """Fetch current status string in background."""
+        cmd = self.properties.get("value_command", "")
+        if not cmd:
+            return
+        
+        try:
+            # Run command with explicit shell execution
+            res = subprocess.run(
+                cmd, 
+                shell=True, 
+                capture_output=True, 
+                text=True, 
+                timeout=SUBPROCESS_TIMEOUT_SHORT
+            )
+            
+            if res.returncode == 0:
+                value = res.stdout.strip()
+                if value:
+                    GLib.idle_add(self._update_selection_ui, value)
+            else:
+                log.warning(f"Selection command failed: {cmd}\nStderr: {res.stderr.strip()}")
+
+        except subprocess.TimeoutExpired:
+            log.warning(f"Selection command timed out: {cmd}")
+        except Exception as e:
+            log.error(f"Selection monitor error: {e}")
+
+    def _update_selection_ui(self, value: str) -> bool:
+        """Update the dropdown selection on main thread."""
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+
+        if value not in self.options_list:
+            # If value isn't in options, we might need to refresh options
+            if self.properties.get("options_command"):
+                 _submit_task_safe(self._fetch_options_async, self._state)
+            return GLib.SOURCE_REMOVE
+
+        idx = self.options_list.index(value)
+        
+        # Only update if different to avoid UI flicker
+        if self.get_selected() != idx:
+            with self._suppress_change_signal():
+                self.set_selected(idx)
+
+        return GLib.SOURCE_REMOVE
+
+    def _on_selected(self, _row: Adw.ComboRow, _param: GObject.ParamSpec) -> None:
+        """Handle user selection."""
+        if self._programmatic_update:
+            return
+
         model = self.get_model()
         if not model:
             return
 
         idx = self.get_selected()
-        if idx == -1:
+        # GTK4 uses a generic uint max for invalid, checking bounds is safer/easier
+        if idx >= model.get_n_items(): 
             return
 
         item = model.get_string(idx)
 
         if isinstance(self.on_action, dict) and (cmd := self.on_action.get("command")):
-            final_cmd = str(cmd).replace("{value}", item)
+            # Security: Quote the value to prevent shell injection from config strings
+            safe_value = shlex.quote(item)
+            final_cmd = str(cmd).replace("{value}", safe_value)
+            
             utility.execute_command(
                 final_cmd,
                 "Selection",
@@ -1310,8 +1530,16 @@ class NavigationRow(BaseActionRow):
         """Handle row activation to push a subpage."""
         if self.nav_view and self.builder_func:
             title = str(self.properties.get("title", "Subpage"))
+            
+            # Update path context for the subpage
+            current_path = self.context.get("path", [])
+            new_path = list(current_path) + [title]
+            
+            new_ctx = self.context.copy()
+            new_ctx["path"] = new_path
+            
             self.nav_view.push(
-                self.builder_func(title, self.layout_data, self.context)
+                self.builder_func(title, self.layout_data, new_ctx)
             )
 
 

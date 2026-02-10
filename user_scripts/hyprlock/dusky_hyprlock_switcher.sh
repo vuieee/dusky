@@ -1,366 +1,382 @@
 #!/usr/bin/env bash
-
 # -----------------------------------------------------------------------------
-# Script: Hyprlock Theme Manager (htm)
-# Description: Enterprise-grade configuration management for Hyprlock themes.
-#              Optimized for Arch/Hyprland/UWSM ecosystems.
-# Features:    Source-based loading, XDG compliance, ANSI-safe UI, Smart Detection.
+# Dusky Hyprlock Manager v4.2.1
+# -----------------------------------------------------------------------------
+# Source A: Dusky TUI Engine v3.3.2 (Rendering, Input, Safety)
+# Source B: Hyprlock Theme Manager v2.0.0 (Logic, Discovery)
+#
+# FEATURES:
+#   - Pure Theme Switching (No tabs)
+#   - Tilde (~) Path Preservation
+#   - Full Vim/Arrow/Page Navigation
+#   - Configurable Mouse Hitbox
 # -----------------------------------------------------------------------------
 
-set -uo pipefail
+set -euo pipefail
 
-# --- Bash Version Check ---
-if (( BASH_VERSINFO[0] < 5 )); then
-    printf 'Error: Bash 5.0+ required (current: %s)\n' "$BASH_VERSION" >&2
-    exit 1
-fi
+# =============================================================================
+# ▼ USER CONFIGURATION ▼
+# =============================================================================
 
-# --- Configuration & Constants ---
-# Use distinct name to avoid shadowing the environment variable
-readonly _CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-readonly CONFIG_ROOT="${_CONFIG_HOME}/hypr"
-readonly THEMES_ROOT="${CONFIG_ROOT}/hyprlock_themes"
+# Paths
+readonly HYPR_DIR="${HOME}/.config/hypr"
+readonly CONFIG_FILE="${HYPR_DIR}/hyprlock.conf"
+readonly THEMES_DIR="${HYPR_DIR}/hyprlock_themes"
 
-# State variables (Integers for boolean efficiency)
-declare -i SELECTED_IDX=0
-declare -i TOGGLE_MODE=0
-declare -i PREVIEW_MODE=0
-declare -i IN_ALTERNATE_SCREEN=0
+# UI Settings
+readonly APP_TITLE="Dusky Hyprlock Manager"
+readonly APP_VERSION="v4.2.1"
 
-# Global theme arrays
-declare -a THEME_PATHS=()
-declare -a THEME_NAMES=()
+# Dimensions
+declare -ri MAX_DISPLAY_ROWS=12
+declare -ri BOX_INNER_WIDTH=80
+declare -ri ITEM_PADDING=50
+declare -ri HEADER_ROWS=4
+# FIX: Adjusted start row calculation to match visual layout
+declare -ri ITEM_START_ROW=$(( HEADER_ROWS + 1 ))
 
-# --- Colors & Styling ---
-readonly R=$'\033[0;31m'
-readonly G=$'\033[0;32m'
-readonly Y=$'\033[1;33m'
-readonly B=$'\033[0;34m'
-readonly C=$'\033[0;36m'
-readonly NC=$'\033[0m'
-readonly BOLD=$'\033[1m'
-readonly DIM=$'\033[2m'
+# MOUSE CONTROL
+# 82 = Full width. Set to ~38 to restrict clicks to the text area.
+declare -ri MOUSE_HITBOX_LIMIT=82
 
-# --- Logging ---
-log_info()    { printf '%s[INFO]%s %s\n' "$B" "$NC" "$*"; }
-log_success() { printf '%s[SUCCESS]%s %s\n' "$G" "$NC" "$*"; }
-log_warn()    { printf '%s[WARN]%s %s\n' "$Y" "$NC" "$*" >&2; }
-log_err()     { printf '%s[ERROR]%s %s\n' "$R" "$NC" "$*" >&2; }
+# =============================================================================
+# ▲ END USER CONFIGURATION ▲
+# =============================================================================
 
-# --- Usage ---
-usage() {
-    cat <<EOF
-${BOLD}Hyprlock Theme Manager${NC}
+# --- Pre-computed Constants ---
+declare _h_line_buf
+printf -v _h_line_buf '%*s' "$BOX_INNER_WIDTH" ''
+readonly H_LINE="${_h_line_buf// /─}"
+unset _h_line_buf
 
-Usage: ${0##*/} [OPTIONS]
+# --- ANSI Constants ---
+readonly C_RESET=$'\033[0m'
+readonly C_CYAN=$'\033[1;36m'
+readonly C_GREEN=$'\033[1;32m'
+readonly C_MAGENTA=$'\033[1;35m'
+readonly C_RED=$'\033[1;31m'
+readonly C_YELLOW=$'\033[1;33m'
+readonly C_WHITE=$'\033[1;37m'
+readonly C_GREY=$'\033[1;30m'
+readonly C_INVERSE=$'\033[7m'
+readonly CLR_EOL=$'\033[K'
+readonly CLR_EOS=$'\033[J'
+readonly CLR_SCREEN=$'\033[2J'
+readonly CURSOR_HOME=$'\033[H'
+readonly CURSOR_HIDE=$'\033[?25l'
+readonly CURSOR_SHOW=$'\033[?25h'
+readonly MOUSE_ON=$'\033[?1000h\033[?1002h\033[?1006h'
+readonly MOUSE_OFF=$'\033[?1000l\033[?1002l\033[?1006l'
 
-Options:
-  --toggle      Cycle to the next theme (outputs name for notifications)
-  --preview     Show config preview in interactive mode
-  -h, --help    Show this help message
+readonly ESC_READ_TIMEOUT=0.05
 
-Theme path: ${THEMES_ROOT}/<theme>/hyprlock.conf
-EOF
+# --- State Management ---
+declare -i SELECTED_ROW=0
+declare -i SCROLL_OFFSET=0
+declare -i PREVIEW_ENABLED=0
+declare ORIGINAL_STTY=""
+
+# --- Data Structures ---
+declare -a THEME_LIST=()
+declare -A THEME_PATHS=()
+declare ACTIVE_THEME=""
+
+# --- System Helpers ---
+
+log_err() {
+    printf '%s[ERROR]%s %s\n' "$C_RED" "$C_RESET" "$1" >&2
 }
 
-# --- Cleanup & Traps ---
 cleanup() {
-    # 1. Exit alternate screen (restore buffer)
-    # 2. Restore cursor visibility
-    # stderr silenced to prevent noise during shutdown errors
-    if (( IN_ALTERNATE_SCREEN )); then
-        tput rmcup 2>/dev/null || true
-        tput cnorm 2>/dev/null || true
+    printf '%s%s%s' "$MOUSE_OFF" "$CURSOR_SHOW" "$C_RESET" 2>/dev/null || :
+    if [[ -n "${ORIGINAL_STTY:-}" ]]; then
+        stty "$ORIGINAL_STTY" 2>/dev/null || :
     fi
+    printf '\n' 2>/dev/null || :
 }
-# Only trap EXIT; INT/TERM will trigger EXIT automatically. 
+
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# --- Dependencies ---
-check_deps() {
-    # 'head' removed (pure bash used instead), 'find', 'sort', 'tput', 'realpath' required
-    local -a deps=(tput realpath find sort)
-    local -a missing=()
-    local cmd
+# --- Regex Helpers (v3.3.2) ---
 
-    for cmd in "${deps[@]}"; do
-        command -v "$cmd" &>/dev/null || missing+=("$cmd")
-    done
-
-    if (( ${#missing[@]} )); then
-        log_err "Missing core dependencies: ${missing[*]}"
-        exit 1
-    fi
-
-    command -v jq &>/dev/null || \
-        log_warn "jq not found; theme.json metadata will be ignored."
+escape_sed_replacement() {
+    local _esc_input=$1
+    local -n _esc_out_ref=$2
+    _esc_input=${_esc_input//\\/\\\\}
+    _esc_input=${_esc_input//|/\\|}
+    _esc_input=${_esc_input//&/\\&}
+    _esc_input=${_esc_input//$'\n'/\\n}
+    _esc_out_ref=$_esc_input
 }
 
-# --- Initialization ---
-init() {
-    if (( EUID == 0 )); then
-        log_err "Do not run as root. User configuration only."
-        exit 1
-    fi
+# --- Initialization & Logic ---
 
-    if [[ ! -d "$THEMES_ROOT" ]]; then
-        log_err "Themes directory not found: $THEMES_ROOT"
-        log_info "Create it and add subdirectories containing 'hyprlock.conf'."
-        exit 1
-    fi
-
-    check_deps
-}
-
-# --- Theme Discovery ---
-discover_themes() {
+init_themes() {
+    # Discovery Logic
     local config_file dir name
+    THEME_LIST=()
+    
+    if [[ ! -d "$THEMES_DIR" ]]; then
+        return
+    fi
 
-    # Optimization: Use process substitution + read loop to avoid subshells
     while IFS= read -r -d '' config_file; do
-        # Optimization: Bash Parameter Expansion is 100x faster than $(dirname)
         dir="${config_file%/*}"
-        THEME_PATHS+=("$dir")
-
         name=""
-        # Parse theme.json if jq is available
         if [[ -f "${dir}/theme.json" ]] && command -v jq &>/dev/null; then
             name=$(jq -r '.name // empty' "${dir}/theme.json" 2>/dev/null) || true
         fi
+        [[ -z "$name" ]] && name="${dir##*/}"
 
-        # Fallback to directory name
-        if [[ -z "$name" ]]; then
-             name="${dir##*/}"
-        fi
-        THEME_NAMES+=("$name")
-
-    done < <(find "$THEMES_ROOT" -mindepth 2 -maxdepth 2 \
-                  -name "hyprlock.conf" -print0 2>/dev/null | sort -z)
-
-    if (( ${#THEME_PATHS[@]} == 0 )); then
-        log_err "No themes found in $THEMES_ROOT"
-        exit 1
-    fi
+        THEME_LIST+=("$name")
+        THEME_PATHS["$name"]="$dir"
+    done < <(find "$THEMES_DIR" -mindepth 2 -maxdepth 2 -name "hyprlock.conf" -print0 | sort -z)
 }
 
-# --- Detect Current Theme ---
-detect_current_theme() {
-    local target="${CONFIG_ROOT}/hyprlock.conf"
-    local real_target=""
-    local real_theme_dir candidate_resolved
-    local -i i
+detect_active_theme() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then return; fi
 
-    # If target doesn't exist, we default to index 0
-    [[ -e "$target" ]] || return 0
-
-    if [[ -L "$target" ]]; then
-        # Handle legacy symlink detection
-        real_target=$(realpath -- "$target" 2>/dev/null) || return 0
-    elif [[ -f "$target" ]]; then
-        # Handle new 'source = path' detection (Pure Bash)
-        while IFS='=' read -r key value || [[ -n "$key" ]]; do
-            # Trim leading/trailing whitespace
-            key="${key#"${key%%[![:space:]]*}"}"
-            key="${key%"${key##*[![:space:]]}"}"
-            
-            if [[ "$key" == "source" ]]; then
-                # Extract path and trim
-                local path="$value"
-                path="${path#"${path%%[![:space:]]*}"}"
-                path="${path%"${path##*[![:space:]]}"}"
-                
-                # Expand tilde if present
-                if [[ "$path" == "~"* ]]; then
-                    path="${HOME}${path:1}"
-                fi
-                
-                real_target=$(realpath -- "$path" 2>/dev/null)
-                break
-            fi
-        done < "$target"
-    fi
-
-    # If we couldn't resolve a target path, return
-    [[ -n "$real_target" ]] || return 0
+    local line source_path resolved_path
+    source_path=$(grep '^[[:space:]]*source[[:space:]]*=' "$CONFIG_FILE" | head -n1 | cut -d'=' -f2-)
     
-    real_theme_dir="${real_target%/*}"
+    source_path="${source_path#"${source_path%%[![:space:]]*}"}"
+    source_path="${source_path%"${source_path##*[![:space:]]}"}"
 
-    for (( i = 0; i < ${#THEME_PATHS[@]}; i++ )); do
-        # FAST PATH: Pure string comparison (no fork)
-        if [[ "${THEME_PATHS[i]}" == "$real_theme_dir" ]]; then
-            SELECTED_IDX=$i
-            return 0
-        fi
+    if [[ "$source_path" == "~"* ]]; then
+        resolved_path="${HOME}${source_path:1}"
+    else
+        resolved_path="$source_path"
+    fi
 
-        # SLOW PATH: Resolve symlinks (forks 'realpath')
-        candidate_resolved=$(realpath -- "${THEME_PATHS[i]}" 2>/dev/null) || continue
-        if [[ "$candidate_resolved" == "$real_theme_dir" ]]; then
-            SELECTED_IDX=$i
-            return 0
+    local name path
+    ACTIVE_THEME=""
+    for name in "${THEME_LIST[@]}"; do
+        path="${THEME_PATHS[$name]}/hyprlock.conf"
+        if [[ "$path" == "$resolved_path" ]]; then
+            ACTIVE_THEME="$name"
+            return
         fi
     done
 }
 
-# --- UI Drawing ---
+apply_theme() {
+    local theme_name=$1
+    local theme_dir="${THEME_PATHS[$theme_name]:-}"
+    [[ -z "$theme_dir" ]] && return
+
+    local source_path="${theme_dir}/hyprlock.conf"
+    if [[ ! -r "$source_path" ]]; then return; fi
+
+    local tilde_path="${source_path/#"$HOME"/\~}"
+    local safe_path
+    escape_sed_replacement "$tilde_path" safe_path
+    
+    sed --follow-symlinks -i \
+        "s|^\([[:space:]]*source[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_path}|" \
+        "$CONFIG_FILE"
+        
+    ACTIVE_THEME="$theme_name"
+}
+
+# --- UI Rendering (v3.3.2 Engine) ---
+
 draw_ui() {
-    local -i i 
+    local buf="" pad_buf="" padded_item="" item display
+    local -i i count visible_start visible_end rows_rendered
+    local -i visible_len left_pad right_pad
 
-    # Clear screen (ANSI) and home cursor. 
-    printf '\033[H\033[2J'
+    buf+="${CURSOR_HOME}"
+    buf+="${C_MAGENTA}┌${H_LINE}┐${C_RESET}"$'\n'
 
-    # Header
-    printf '%s%sHyprlock Theme Manager%s\n' "$BOLD" "$B" "$NC"
-    printf '%s↑/k ↓/j:Navigate  Enter:Apply  q:Quit%s\n\n' "$DIM" "$NC"
+    visible_len=$(( ${#APP_TITLE} + ${#APP_VERSION} + 1 ))
+    left_pad=$(( (BOX_INNER_WIDTH - visible_len) / 2 ))
+    right_pad=$(( BOX_INNER_WIDTH - visible_len - left_pad ))
+    printf -v pad_buf '%*s' "$left_pad" ''
+    buf+="${C_MAGENTA}│${pad_buf}${C_WHITE}${APP_TITLE} ${C_CYAN}${APP_VERSION}${C_MAGENTA}"
+    printf -v pad_buf '%*s' "$right_pad" ''
+    buf+="${pad_buf}│${C_RESET}"$'\n'
 
-    # Theme list
-    for (( i = 0; i < ${#THEME_NAMES[@]}; i++ )); do
-        if (( i == SELECTED_IDX )); then
-            printf ' %s▸ %s%s\n' "$G$BOLD" "${THEME_NAMES[i]}" "$NC"
+    buf+="${C_MAGENTA}├${H_LINE}┤${C_RESET}"$'\n'
+
+    count=${#THEME_LIST[@]}
+
+    if (( count == 0 )); then SELECTED_ROW=0; SCROLL_OFFSET=0;
+    else
+        (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
+        (( SELECTED_ROW >= count )) && SELECTED_ROW=$(( count - 1 ))
+        if (( SELECTED_ROW < SCROLL_OFFSET )); then SCROLL_OFFSET=$SELECTED_ROW;
+        elif (( SELECTED_ROW >= SCROLL_OFFSET + MAX_DISPLAY_ROWS )); then SCROLL_OFFSET=$(( SELECTED_ROW - MAX_DISPLAY_ROWS + 1 )); fi
+        local -i max_scroll=$(( count - MAX_DISPLAY_ROWS ))
+        (( max_scroll < 0 )) && max_scroll=0
+        (( SCROLL_OFFSET > max_scroll )) && SCROLL_OFFSET=$max_scroll
+    fi
+
+    visible_start=$SCROLL_OFFSET
+    visible_end=$(( SCROLL_OFFSET + MAX_DISPLAY_ROWS ))
+    (( visible_end > count )) && visible_end=$count
+
+    if (( SCROLL_OFFSET > 0 )); then buf+="${C_GREY}    ▲ (more above)${CLR_EOL}${C_RESET}"$'\n';
+    else buf+="${CLR_EOL}"$'\n'; fi
+
+    for (( i = visible_start; i < visible_end; i++ )); do
+        item=${THEME_LIST[i]}
+        if [[ "$item" == "$ACTIVE_THEME" ]]; then
+            display="${C_GREEN}● ACTIVE${C_RESET}"
         else
-            printf '   %s%s%s\n' "$DIM" "${THEME_NAMES[i]}" "$NC"
+            display="${C_GREY}○${C_RESET}"
+        fi
+
+        printf -v padded_item "%-${ITEM_PADDING}s" "${item:0:${ITEM_PADDING}}"
+        if (( i == SELECTED_ROW )); then
+            buf+="${C_CYAN} ➤ ${C_INVERSE}${padded_item}${C_RESET} ${display}${CLR_EOL}"$'\n'
+        else
+            buf+="    ${padded_item} ${display}${CLR_EOL}"$'\n'
         fi
     done
 
-    # Preview pane
-    if (( PREVIEW_MODE )); then
-        local conf="${THEME_PATHS[SELECTED_IDX]}/hyprlock.conf"
-        printf '\n%s── Preview ──%s\n' "$C" "$NC"
-        
+    rows_rendered=$(( visible_end - visible_start ))
+    for (( i = rows_rendered; i < MAX_DISPLAY_ROWS; i++ )); do buf+="${CLR_EOL}"$'\n'; done
+
+    if (( count > MAX_DISPLAY_ROWS )); then
+        local position_info="[$(( SELECTED_ROW + 1 ))/${count}]"
+        if (( visible_end < count )); then buf+="${C_GREY}    ▼ (more below) ${position_info}${CLR_EOL}${C_RESET}"$'\n';
+        else buf+="${C_GREY}                   ${position_info}${CLR_EOL}${C_RESET}"$'\n'; fi
+    else buf+="${CLR_EOL}"$'\n'; fi
+
+    buf+="${C_MAGENTA}└${H_LINE}┘${C_RESET}"$'\n'
+    buf+="${C_CYAN} [Ent] Apply  [p] Preview  [j/k] Nav  [g/G] Top/Bot  [q] Quit${C_RESET}"$'\n'
+
+    if (( PREVIEW_ENABLED )); then
+        local theme_name=${THEME_LIST[SELECTED_ROW]}
+        local conf="${THEME_PATHS[$theme_name]}/hyprlock.conf"
+        buf+="${C_MAGENTA}── Preview: ${C_WHITE}${theme_name}${C_MAGENTA} ──${C_RESET}"$'\n'
         if [[ -r "$conf" ]]; then
-            local line
-            local -i count=0
-            # Read first 10 lines safely (Pure Bash 'head')
-            while (( count < 10 )) && IFS= read -r line; do
-                printf '  %s%s%s\n' "$DIM" "$line" "$NC"
-                (( count++ ))
+            local p_line; local -i pcount=0
+            while (( pcount < 6 )) && IFS= read -r p_line; do
+                buf+="  ${C_GREY}${p_line:0:76}${C_RESET}${CLR_EOL}"$'\n'
+                (( pcount++ )) || true 
             done < "$conf"
         else
-            printf '  %s(unable to read config)%s\n' "$DIM" "$NC"
+             buf+="  ${C_RED}(No config found)${C_RESET}${CLR_EOL}"$'\n'
+        fi
+    else
+        buf+="${CLR_EOL}"$'\n'
+    fi
+    buf+="${CLR_EOS}"
+    printf '%s' "$buf"
+}
+
+# --- Input Handling ---
+
+navigate() {
+    local -i dir=$1
+    local -i count=${#THEME_LIST[@]}
+    (( count == 0 )) && return 0
+    SELECTED_ROW=$(( (SELECTED_ROW + dir + count) % count ))
+}
+
+# RESTORED: Page Up/Down logic
+navigate_page() {
+    local -i dir=$1
+    local -i count=${#THEME_LIST[@]}
+    (( count == 0 )) && return 0
+    SELECTED_ROW=$(( SELECTED_ROW + dir * MAX_DISPLAY_ROWS ))
+    if (( SELECTED_ROW < 0 )); then SELECTED_ROW=0; fi
+    if (( SELECTED_ROW >= count )); then SELECTED_ROW=$(( count - 1 )); fi
+}
+
+# RESTORED: Home/End logic
+navigate_end() {
+    local -i target=$1 # 0=Start, 1=End
+    local -i count=${#THEME_LIST[@]}
+    (( count == 0 )) && return 0
+    if (( target == 0 )); then SELECTED_ROW=0; else SELECTED_ROW=$(( count - 1 )); fi
+}
+
+handle_mouse() {
+    local input=$1
+    local body=${input#'[<'}
+    [[ "$body" == "$input" ]] && return 0
+    local terminator=${body: -1}
+    [[ "$terminator" != "M" && "$terminator" != "m" ]] && return 0
+    body=${body%[Mm]}
+    local field1 field2 field3
+    IFS=';' read -r field1 field2 field3 <<< "$body"
+    
+    local -i button=$field1 x=$field2 y=$field3
+
+    if (( button == 64 )); then navigate -1; return 0; fi
+    if (( button == 65 )); then navigate 1; return 0; fi
+    [[ "$terminator" != "M" ]] && return 0 
+
+    if (( x > MOUSE_HITBOX_LIMIT )); then return 0; fi
+
+    if (( y >= ITEM_START_ROW && y < ITEM_START_ROW + MAX_DISPLAY_ROWS )); then
+        local -i clicked_idx=$(( y - ITEM_START_ROW + SCROLL_OFFSET ))
+        if (( clicked_idx >= 0 && clicked_idx < ${#THEME_LIST[@]} )); then
+            SELECTED_ROW=$clicked_idx
+            if (( button == 0 )); then apply_theme "${THEME_LIST[SELECTED_ROW]}"; fi
         fi
     fi
 }
 
-# --- Apply Theme ---
-apply_theme() {
-    local theme_dir="$1"
-    local theme_name="$2"
-    local target="${CONFIG_ROOT}/hyprlock.conf"
-    local source="${theme_dir}/hyprlock.conf"
-
-    # Validate source exists and is readable
-    if [[ ! -r "$source" ]]; then
-        log_err "Cannot read theme config: $source"
-        return 1
-    fi
-
-    local source_entry="${source/#$HOME/\~}"
-
-    if ! printf 'source = %s\n' "$source_entry" > "$target"; then
-        log_err "Failed to write config file: $target"
-        return 1
-    fi
-
-    if (( TOGGLE_MODE )); then
-        # Just print the name. Useful for: notify-send "Theme" "$(htm --toggle)"
-        printf '%s\n' "$theme_name"
-    else
-        log_success "Applied theme: $theme_name"
-    fi
+read_escape_seq() {
+    local -n _esc_out=$1
+    local char
+    _esc_out=""
+    while IFS= read -rsn1 -t "$ESC_READ_TIMEOUT" char; do
+        _esc_out+="$char"
+        case "$_esc_out" in
+            '[Z'|O[A-Za-z]|'['*[A-Za-z~]) return 0 ;;
+        esac
+    done
 }
 
-# --- Interactive Mode ---
-run_interactive() {
-    local -i total=${#THEME_PATHS[@]}
-    local key seq
+# --- Main ---
 
-    # Robustness: Check if we are actually connected to a terminal
-    if [[ ! -t 0 ]]; then
-        log_err "Interactive mode requires a terminal (stdin is not a TTY)"
-        exit 1
-    fi
+main() {
+    if (( BASH_VERSINFO[0] < 5 )); then log_err "Bash 5.0+ required"; exit 1; fi
+    for _dep in awk sed find sort grep; do
+        if ! command -v "$_dep" &>/dev/null; then log_err "Missing dep: $_dep"; exit 1; fi
+    done
 
-    # Enter alternate screen buffer (silenced)
-    tput smcup 2>/dev/null || true
-    tput civis 2>/dev/null || true
-    IN_ALTERNATE_SCREEN=1
+    init_themes
+    detect_active_theme
+
+    ORIGINAL_STTY=$(stty -g 2>/dev/null) || ORIGINAL_STTY=""
+    stty -icanon -echo min 1 time 0 2>/dev/null || :
+    printf '%s%s%s%s' "$MOUSE_ON" "$CURSOR_HIDE" "$CLR_SCREEN" "$CURSOR_HOME"
+
+    local key escape_seq
 
     while true; do
         draw_ui
-
-        # Read single keypress
         IFS= read -rsn1 key || break
-
-        # Handle escape sequences (arrow keys)
         if [[ "$key" == $'\x1b' ]]; then
-            # Wait 0.1s for rest of sequence (standard for human/ssh latency)
-            IFS= read -rsn2 -t 0.1 seq || seq=""
-            key+="$seq"
+            read_escape_seq escape_seq
+            case "$escape_seq" in
+                '[A'|'OA')    navigate -1 ;;      # Up Arrow
+                '[B'|'OB')    navigate 1 ;;       # Down Arrow
+                '[5~')        navigate_page -1 ;; # Page Up
+                '[6~')        navigate_page 1 ;;  # Page Down
+                '[H'|'[1~')   navigate_end 0 ;;   # Home Key
+                '[F'|'[4~')   navigate_end 1 ;;   # End Key
+                '['*'<'*[Mm]) handle_mouse "$escape_seq" ;;
+            esac
+        else
+            case "$key" in
+                k|K)          navigate -1 ;;
+                j|J)          navigate 1 ;;
+                g)            navigate_end 0 ;;   # Vim Top
+                G)            navigate_end 1 ;;   # Vim Bottom
+                $'\r'|"")     apply_theme "${THEME_LIST[SELECTED_ROW]}" ;;
+                p|P)          PREVIEW_ENABLED=$(( 1 - PREVIEW_ENABLED )) ;;
+                q|Q|$'\x03')  break ;;
+            esac
         fi
-
-        case "$key" in
-            $'\x1b[A' | k)  # Up arrow or k
-                (( SELECTED_IDX = (SELECTED_IDX - 1 + total) % total ))
-                ;;
-            $'\x1b[B' | j)  # Down arrow or j
-                (( SELECTED_IDX = (SELECTED_IDX + 1) % total ))
-                ;;
-            '')  # Enter key (empty string from read -n1)
-                # Cleanup MUST happen before applying to ensure logging works
-                cleanup
-                IN_ALTERNATE_SCREEN=0
-                apply_theme "${THEME_PATHS[SELECTED_IDX]}" "${THEME_NAMES[SELECTED_IDX]}"
-                exit $?
-                ;;
-            q | Q)
-                exit 0
-                ;;
-            # Ignore raw escape to prevent accidental exit
-            $'\x1b') ;;
-        esac
     done
-}
-
-# --- Main Entry Point ---
-main() {
-    while (( $# )); do
-        case "$1" in
-            --toggle)
-                TOGGLE_MODE=1
-                ;;
-            --preview)
-                PREVIEW_MODE=1
-                ;;
-            -h | --help)
-                usage
-                exit 0
-                ;;
-            --)
-                shift
-                break
-                ;;
-            -*)
-                log_err "Unknown option: $1"
-                usage >&2
-                exit 1
-                ;;
-            *)
-                break
-                ;;
-        esac
-        shift
-    done
-
-    init
-    discover_themes
-    detect_current_theme
-
-    if (( TOGGLE_MODE )); then
-        local -i total=${#THEME_PATHS[@]}
-        (( SELECTED_IDX = (SELECTED_IDX + 1) % total ))
-        apply_theme "${THEME_PATHS[SELECTED_IDX]}" "${THEME_NAMES[SELECTED_IDX]}"
-    else
-        run_interactive
-    fi
 }
 
 main "$@"

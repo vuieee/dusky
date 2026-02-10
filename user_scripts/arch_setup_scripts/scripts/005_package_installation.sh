@@ -53,12 +53,12 @@ pkgs_dev=(
 
 # Group 10: Multimedia
 pkgs_multimedia=(
-"ffmpeg" "mpv" "mpv-mpris" "swappy" "swayimg" "resvg" "imagemagick" "libheif" "obs-studio" "audacity" "handbrake" "guvcview" "ffmpegthumbnailer" "krita" "grim" "slurp" "wl-clipboard" "cliphist" "tesseract-data-eng"
+"ffmpeg" "mpv" "mpv-mpris" "swappy" "swayimg" "resvg" "imagemagick" "libheif" "obs-studio" "gpu-screen-recorder" "audacity" "handbrake" "guvcview" "ffmpegthumbnailer" "krita" "grim" "slurp" "wl-clipboard" "cliphist" "tesseract-data-eng"
 )
 
 # Group 11: Sys Admin
 pkgs_sysadmin=(
-"btop" "htop" "dgop" "nvtop" "inxi" "sysstat" "sysbench" "logrotate" "acpid" "tlp" "tlp-rdw" "thermald" "powertop" "gdu" "iotop" "iftop" "lshw" "wev" "pacman-contrib" "gnome-keyring" "libsecret" "seahorse" "yad" "dysk" "fwupd" "caligula"
+"btop" "htop" "dgop" "nvtop" "inxi" "sysstat" "sysbench" "logrotate" "acpid" "tlp" "tlp-pd" "tlp-rdw" "thermald" "powertop" "gdu" "iotop" "iftop" "lshw" "wev" "pacman-contrib" "gnome-keyring" "libsecret" "seahorse" "yad" "dysk" "fwupd" "caligula"
 )
 
 # Group 12: Gnome Utilities

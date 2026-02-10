@@ -64,7 +64,7 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: Dusky Update
+        title: Dusky
         icon: system-software-update-symbolic
         style: suggested
         badge_file: ~/.config/dusky/settings/dusky_update_behind_commit
@@ -74,16 +74,40 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: Power Menu
+        title: Power
         icon: system-log-out-symbolic
         style: destructive
       on_press:
         type: exec
         command: $HOME/user_scripts/wlogout/wlogout_scale.sh
         terminal: false
+
+  - type: section
+    properties:
+      title: Power Management
+      icon: ''
+      description: ''
+    items:
+    - type: selection
+      properties:
+        title: Active Profile
+        description: Select performance mode
+        icon: power-profile-balanced-symbolic
+        options:
+        - Balanced
+        - Performance
+        - Power Saver
+        value_command: "tlpctl get | sed 's/balanced/Balanced/;s/performance/Performance/;s/power-saver/Power Saver/'"
+        interval: 5
+      on_change:
+        type: exec
+        command: "tlpctl $(echo '{value}' | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g') && notify-send 'Power Profile' 'Switched to {value}'"
+
   - type: section
     properties:
       title: Quick Controls
+      icon: ''
+      description: ''
     items:
     - type: slider
       properties:
@@ -103,7 +127,7 @@ pages:
       properties:
         title: Brightness
         icon: display-brightness-high-symbolic
-        min: 0
+        min: 1
         max: 100
         step: 1
         default: 50
@@ -113,9 +137,12 @@ pages:
       on_change:
         type: exec
         command: brightnessctl set {value}%
+
   - type: section
     properties:
       title: Live System Status
+      icon: ''
+      description: ''
     items:
     - type: label
       properties:
@@ -136,59 +163,120 @@ pages:
   title: System
   icon: computer-symbolic
   layout:
-  - type: section
-    properties:
-      title: Power
-      icon: ''
-      description: ''
+  - type: grid_section
     items:
-    - type: button
+    - type: grid_card
       properties:
-        title: Power Menu
-        description: Shutdown, Reboot, Hibernate (Wlogout)
-        icon: system-log-out-symbolic
-        style: destructive
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/wlogout/wlogout_scale.sh
-        terminal: false
-    - type: button
-      properties:
-        title: Hyprland Reload
-        description: Reload Hyprland configuration
+        title: Hypr Reload
         icon: view-refresh-symbolic
-        button_text: "Reload"
       on_press:
         type: exec
         command: hyprctl reload
         terminal: false
+    - type: grid_card
+      properties:
+        title: Benchmark
+        icon: utilities-system-monitor-symbolic
+      on_press:
+        type: exec
+        command: kitty --class sysbench_benchmark.sh --title "System Benchmark" --hold sh -c "$HOME/user_scripts/performance/sysbench_benchmark.sh"
+        terminal: false
+    - type: grid_card
+      properties:
+        title: About Dusky
+        icon: help-about-symbolic
+      on_press:
+        type: redirect
+        page: about_dusky
+
   - type: section
     properties:
-      title: Information & Updates
+      title: Reset Dusky (takes 5 minutes)
       icon: ''
       description: ''
     items:
     - type: button
       properties:
-        title: About Dusky
-        description: View system version and details
-        icon: help-about-symbolic
-        button_text: "View"
+        title: 'Step 1: Deploy Dotfiles'
+        description: Force sync with Git (Overwrites local configs)
+        icon: folder-download-symbolic
+        style: destructive
+        button_text: "Step 1"
       on_press:
-        type: redirect
-        page: about_dusky
+        type: exec
+        command: kitty --class deploy_dotfiles.sh --hold sh -c $HOME/user_scripts/arch_setup_scripts/deploy_dotfiles.sh
+        terminal: false
     - type: button
       properties:
-        title: System Updater
-        description: Update packages and Dusky configurations
+        title: 'Step 2: Orchestra'
+        description: Full system re-setup (Takes 5-10 mins)
+        icon: preferences-system-symbolic
+        style: destructive
+        button_text: "Step 2"
+      on_press:
+        type: exec
+        command: kitty --class ORCHESTRA.sh --hold sh -c $HOME/user_scripts/arch_setup_scripts/ORCHESTRA.sh
+        terminal: false
+
+  - type: section
+    properties:
+      title: Git Backup
+      icon: ''
+      description: ''
+    items:
+    - type: button
+      properties:
+        title: Setup New Repo
+        description: Initialize a new GitHub repository for dotfiles
+        icon: folder-new-symbolic
+        button_text: "Setup"
+      on_press:
+        type: exec
+        command: kitty --class new_github_repo_to_backup.sh --hold sh -c "$HOME/user_scripts/desktop_apps/new_github_repo_to_backup.sh"
+        terminal: false
+    - type: button
+      properties:
+        title: Reconnect Repo
+        description: Reconnect and push local changes to remote
+        icon: network-server-symbolic
+        button_text: "Reconnect"
+      on_press:
+        type: exec
+        command: kitty --class reconnect_and_push_new_changes_to_github.sh --hold sh -c "$HOME/user_scripts/desktop_apps/reconnect_and_push_new_changes_to_github.sh"
+        terminal: false
+
+  - type: section
+    properties:
+      title: Dusky Updates
+      icon: ''
+      description: ''
+    items:
+    - type: button
+      properties:
+        title: Dusky Updater
+        description: Update Dusky specific configuration files
         icon: system-software-update-symbolic
-        style: suggested
+        badge_file: ~/.config/dusky/settings/dusky_update_behind_commit
+        button_text_file: ~/.config/dusky/settings/dusky_update_behind_commit
+        button_text_map:
+          "0": "Updated"
+          "default": "Available"
+        style_map:
+          "0": "normal"
+          "default": "suggested"
+      on_press:
+        type: exec
+        command: kitty --class update_dusky.sh --title "System Updater" --hold sh -c "$HOME/user_scripts/update_dusky/update_dusky.sh"
+        terminal: false
+    - type: button
+      properties:
+        title: Arch Updater
+        description: Pacman and AUR packages update
+        icon: system-software-update-symbolic
         button_text: "Update"
       on_press:
         type: exec
-        command: kitty --class update_dusky.sh --title "System Updater" --hold sh
-          -c "$HOME/user_scripts/update_dusky/update_dusky.sh"
+        command: kitty --class arch_update --title "Arch Linux Updater" --hold sh -c "paru -Syu"
         terminal: false
     - type: button
       properties:
@@ -210,78 +298,7 @@ pages:
         type: exec
         command: kitty --class send_logs.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/send_logs.sh"
         terminal: false
-  - type: section
-    properties:
-      title: Performance
-      icon: ''
-      description: ''
-    items:
-    - type: button
-      properties:
-        title: System Benchmark
-        description: Run Sysbench performance test
-        icon: utilities-system-monitor-symbolic
-        button_text: "Run"
-      on_press:
-        type: exec
-        command: kitty --class sysbench_benchmark.sh --title "System Benchmark" --hold
-          sh -c "$HOME/user_scripts/performance/sysbench_benchmark.sh"
-        terminal: false
-  - type: section
-    properties:
-      title: Git Backup
-      icon: ''
-      description: ''
-    items:
-    - type: button
-      properties:
-        title: Setup New Repo
-        description: Initialize a new GitHub repository for dotfiles
-        icon: folder-new-symbolic
-        button_text: "Setup"
-      on_press:
-        type: exec
-        command: kitty --class new_github_repo_to_backup.sh --hold sh -c "$HOME/user_scripts/desktop_apps/new_github_repo_to_backup.sh"
-        terminal: false
-    - type: button
-      properties:
-        title: Push Changes
-        description: Reconnect and push local changes to remote
-        icon: network-server-symbolic
-        button_text: "Push"
-      on_press:
-        type: exec
-        command: kitty --class reconnect_and_push_new_changes_to_github.sh --hold
-          sh -c "$HOME/user_scripts/desktop_apps/reconnect_and_push_new_changes_to_github.sh"
-        terminal: false
-  - type: section
-    properties:
-      title: Reset
-      icon: ''
-      description: ''
-    items:
-    - type: button
-      properties:
-        title: 'Step 1: Deploy Dotfiles'
-        description: Force sync with Git (Overwrites local configs)
-        icon: folder-download-symbolic
-        style: destructive
-        button_text: "Deploy"
-      on_press:
-        type: exec
-        command: kitty --class deploy_dotfiles.sh --hold sh -c $HOME/user_scripts/arch_setup_scripts/deploy_dotfiles.sh
-        terminal: false
-    - type: button
-      properties:
-        title: 'Step 2: Orchestra'
-        description: Full system re-setup (Takes 5-10 mins)
-        icon: process-working-symbolic
-        style: destructive
-        button_text: "Start"
-      on_press:
-        type: exec
-        command: kitty --class ORCHESTRA.sh --hold sh -c $HOME/user_scripts/arch_setup_scripts/ORCHESTRA.sh
-        terminal: false
+
 - id: disk_and_files
   title: Disk & Files
   icon: drive-multidisk-symbolic
@@ -297,7 +314,7 @@ pages:
         title: Dysk Analysis
         description: Graphical disk space usage
         icon: drive-harddisk-symbolic
-        button_text: "Open"
+        button_text: "View"
       on_press:
         type: exec
         command: kitty --class dysk --title "Dysk Analysis" --hold sh -c "dysk"
@@ -307,7 +324,7 @@ pages:
         title: Disk I/O Monitor
         description: Real-time disk activity (TUI)
         icon: utilities-system-monitor-symbolic
-        button_text: "Open"
+        button_text: "Monitor"
       on_press:
         type: exec
         command: kitty --class io_monitor.sh --hold sh -c "$HOME/user_scripts/drives/io_monitor.sh"
@@ -324,7 +341,7 @@ pages:
         terminal: false
   - type: section
     properties:
-      title: Free Storage
+      title: Drive Management
       icon: ''
       description: ''
     items:
@@ -338,12 +355,6 @@ pages:
         type: exec
         command: kitty --class cache_purge.sh --hold sh -c "$HOME/user_scripts/desktop_apps/cache_purge.sh"
         terminal: false
-  - type: section
-    properties:
-      title: Drive Management
-      icon: ''
-      description: ''
-    items:
     - type: button
       properties:
         title: Fix NTFS Drives
@@ -390,19 +401,79 @@ pages:
         type: exec
         command: kitty --class change_ftp_directory_server.sh --hold sh -c $HOME/user_scripts/ftp/change_ftp_directory_server.sh
         terminal: false
+
 - id: network
   title: Network
   icon: network-workgroup-symbolic
   layout:
+  - type: grid_section
+    properties:
+      title: Quick Network
+    items:
+    - type: toggle_card
+      properties:
+        title: Warp
+        icon: security-high-symbolic
+        key: warp_state
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/networking/warp_toggle.sh --connect
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/networking/warp_toggle.sh --disconnect
+          terminal: false
+    - type: toggle_card
+      properties:
+        title: Wi-Fi
+        icon: network-wireless-symbolic
+        state_command: nmcli radio wifi
+        interval: 5
+      on_toggle:
+        enabled:
+          type: exec
+          command: kitty --class wifitui --title "Wi-Fi Manager" --hold sh -c "wifitui"
+          terminal: false
+        disabled:
+          type: exec
+          command: kitty --class wifitui --title "Wi-Fi Manager" --hold sh -c "wifitui"
+          terminal: false
+    - type: toggle_card
+      properties:
+        title: Bluetooth
+        icon: bluetooth-active-symbolic
+        state_command: "bluetoothctl show | grep 'Powered: yes' | awk '{print $2}'"
+        interval: 5
+      on_toggle:
+        enabled:
+          type: exec
+          command: kitty --class bluetui --title "Bluetooth Manager" --hold sh -c "bluetui"
+          terminal: false
+        disabled:
+          type: exec
+          command: kitty --class bluetui --title "Bluetooth Manager" --hold sh -c "bluetui"
+          terminal: false
+
   - type: section
     properties:
-      title: VPN & Cloudflare
+      title: Remote
       icon: ''
       description: ''
     items:
     - type: button
       properties:
-        title: Tailscale Setup
+        title: 'Step 1: Setup OpenSSH'
+        description: Configure SSH keys and service
+        icon: system-lock-screen-symbolic
+        button_text: "Setup"
+      on_press:
+        type: exec
+        command: kitty --class 02_openssh_setup.sh --hold sh -c $HOME/user_scripts/networking/02_openssh_setup.sh
+        terminal: false
+    - type: button
+      properties:
+        title: 'Step 2: Tailscale Setup'
         description: Configure mesh VPN
         icon: network-vpn-symbolic
         button_text: "Setup"
@@ -420,47 +491,13 @@ pages:
         type: exec
         command: kitty --class tailscale_uninstall --hold sh -c "$HOME/user_scripts/networking/uninstall_tailscale.sh"
         terminal: false
-    - type: toggle
-      properties:
-        title: Warp
-        icon: security-high-symbolic
-        description: Enable/Disable Cloudflare Warp
-        key: cloudflare_warp_enabled
-      on_toggle:
-        enabled:
-          type: exec
-          command: $HOME/user_scripts/networking/warp_toggle.sh --connect
-          terminal: false
-        disabled:
-          type: exec
-          command: $HOME/user_scripts/networking/warp_toggle.sh --disconnect
-          terminal: false
+
   - type: section
     properties:
-      title: Connectivity Tools
+      title: Network Audit
       icon: ''
       description: ''
     items:
-    - type: button
-      properties:
-        title: Wi-Fi Manager
-        description: Open WifiTUI
-        icon: network-wireless-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: kitty --class wifitui --title "Wi-Fi Manager" --hold sh -c "wifitui"
-        terminal: false
-    - type: button
-      properties:
-        title: Bluetooth Manager
-        description: Open BlueTUI
-        icon: bluetooth-active-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: kitty --class bluetui --title "Bluetooth Manager" --hold sh -c "bluetui"
-        terminal: false
     - type: button
       properties:
         title: Network Scan (ARP)
@@ -473,14 +510,15 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: Setup OpenSSH
-        description: Configure SSH keys and service
-        icon: system-lock-screen-symbolic
+        title: Airmon-ng Setup
+        description: Enable monitor mode on wireless interface
+        icon: network-wireless-hotspot-symbolic
         button_text: "Setup"
       on_press:
         type: exec
-        command: kitty --class 02_openssh_setup.sh --hold sh -c $HOME/user_scripts/networking/02_openssh_setup.sh
+        command: kitty --class airmon_ng.sh --hold sh -c ~/user_scripts/networking/airmon_ng.sh
         terminal: false
+
 - id: hardware
   title: Hardware
   icon: input-keyboard-symbolic
@@ -491,9 +529,23 @@ pages:
       icon: ''
       description: ''
     items:
+    - type: selection
+      properties:
+        title: Active Profile
+        description: Select performance mode
+        icon: power-profile-balanced-symbolic
+        options:
+        - Balanced
+        - Performance
+        - Power Saver
+        value_command: "tlpctl get | sed 's/balanced/Balanced/;s/performance/Performance/;s/power-saver/Power Saver/'"
+        interval: 5
+      on_change:
+        type: exec
+        command: "tlpctl $(echo '{value}' | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g') && notify-send 'Power Profile' 'Switched to {value}'"
     - type: toggle
       properties:
-        title: Power Saver
+        title: Dusky Power Saver
         icon: battery-level-80-symbolic
         description: Optimize for battery life (TUI)
         key: power_saver_state
@@ -508,6 +560,16 @@ pages:
           command: kitty --class power_saver_off.sh --title "Disable Power Saver"
             --hold sh -c "$HOME/user_scripts/battery/power_saving_off/power_saver_off.sh"
           terminal: false
+    - type: button
+      properties:
+        title: Dusky Power Manager
+        description: Configure lid, power key, and logind.conf settings
+        icon: preferences-system-power-symbolic
+        button_text: "Open"
+      on_press:
+        type: exec
+        command: kitty --class dusky_power.sh --title "Power Manager" --hold sh -c "$HOME/user_scripts/power/dusky_power.sh"
+        terminal: false
   - type: section
     properties:
       title: Input Devices
@@ -529,6 +591,7 @@ pages:
           type: exec
           command: $HOME/user_scripts/desktop_apps/mouse_button_reverse.sh --right
           terminal: false
+
 - id: display
   title: Display
   icon: video-display-symbolic
@@ -539,16 +602,36 @@ pages:
       icon: ''
       description: ''
     items:
+    - type: slider
+      properties:
+        title: Brightness
+        icon: display-brightness-high-symbolic
+        min: 1
+        max: 100
+        step: 1
+        default: 50
+        debounce: false
+        value_command: "brightnessctl -m | awk -F, '{print $4}' | tr -d %"
+        interval: 2
+      on_change:
+        type: exec
+        command: brightnessctl set {value}%
     - type: button
       properties:
-        title: Brightness Slider
-        description: Adjust screen brightness
-        icon: display-brightness-high-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/sliders/brightness_slider.sh
-        terminal: false
+        title: Screen Rotation
+        description: Rotates the display
+        icon: object-rotate-right-symbolic
+        buttons:
+          - icon: object-rotate-right-symbolic
+            button_text: "Clockwise"
+            on_press:
+              type: exec
+              command: $HOME/user_scripts/hypr/screen_rotate.sh -90
+          - icon: object-rotate-left-symbolic
+            button_text: "Counter Clockwise"
+            on_press:
+              type: exec
+              command: $HOME/user_scripts/hypr/screen_rotate.sh +90
     - type: button
       properties:
         title: Night Light
@@ -578,44 +661,86 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: Rotate Clockwise
-        description: Reloading hyprland restores defualt screen layout
-        icon: object-rotate-right-symbolic
-        button_text: "Rotate"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/hypr/screen_rotate.sh -90
-        terminal: false
-    - type: button
-      properties:
-        title: Rotate Counter Clockwise
-        description: Reloading hyprland restores defualt screen layout
-        icon: object-rotate-left-symbolic
-        button_text: "Rotate"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/hypr/screen_rotate.sh +90
-        terminal: false
+        title: Fractional Scaling
+        description: Adjust display scale
+        icon: zoom-fit-best-symbolic
+        buttons:
+          - icon: list-remove-symbolic
+            button_text: "-"
+            on_press:
+              type: exec
+              command: $HOME/user_scripts/hypr/adjust_scale.sh -
+          - icon: list-add-symbolic
+            button_text: "+"
+            on_press:
+              type: exec
+              command: $HOME/user_scripts/hypr/adjust_scale.sh +
+
 - id: audio
   title: Audio
   icon: audio-volume-high-symbolic
   layout:
+  - type: grid_section
+    properties:
+      title: Quick Audio
+    items:
+    - type: toggle_card
+      properties:
+        title: Mono Audio
+        icon: audio-card-symbolic
+        key: mono_audio
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
+          terminal: false
+    - type: grid_card
+      properties:
+        title: Shazam
+        icon: media-record-symbolic
+      on_press:
+        type: exec
+        command: $HOME/user_scripts/music/music_recognition.sh
+        terminal: false
+    - type: toggle_card
+      properties:
+        title: Wayclick
+        icon: input-keyboard-symbolic
+        key: wayclick
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/wayclick/wayclick.sh
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/wayclick/wayclick.sh
+          terminal: false
+
   - type: section
     properties:
       title: Controls
       icon: ''
       description: ''
     items:
-    - type: button
+    - type: slider
       properties:
-        title: Volume Control
-        description: Open volume slider
+        title: Volume
         icon: audio-volume-high-symbolic
-        button_text: "Open"
-      on_press:
+        min: 0
+        max: 100
+        step: 1
+        default: 50
+        debounce: false
+        value_command: "wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print $2 * 100}'"
+        interval: 2
+      on_change:
         type: exec
-        command: $HOME/user_scripts/sliders/volume_slider.sh
-        terminal: false
+        command: wpctl set-volume @DEFAULT_AUDIO_SINK@ {value}%
     - type: button
       properties:
         title: Audio Mixer
@@ -652,67 +777,19 @@ pages:
         type: exec
         command: $HOME/user_scripts/audio/mic_switch.sh
         terminal: false
-  - type: section
-    properties:
-      title: Effects & Tools
-      icon: ''
-      description: ''
-    items:
-    - type: button
-      properties:
-        title: Mono Audio
-        description: Toggle Mono/Stereo output
-        icon: audio-card-symbolic
-        button_text: "Toggle"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
-        terminal: false
-    - type: button
-      properties:
-        title: Music Recognition
-        description: Identify song playing now
-        icon: media-record-symbolic
-        button_text: "Identify"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/music/music_recognition.sh
-        terminal: false
-    - type: button
-      properties:
-        title: Wayclick
-        description: Enable mechanical keyboard sound effects
-        icon: input-keyboard-symbolic
-        button_text: "Enable"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/wayclick/wayclick.sh
-        terminal: false
+
 - id: visuals
   title: Visuals
   icon: applications-graphics-symbolic
   layout:
-  - type: section
+  - type: grid_section
     properties:
-      title: Theming
-      icon: ''
-      description: ''
+      title: Quick Visuals
     items:
-    - type: button
-      properties:
-        title: Cycle Theme
-        description: Generate colors from random wallpaper
-        icon: palette-symbolic
-        button_text: "Cycle"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/theme_matugen/theme_ctl.sh random
-        terminal: false
-    - type: toggle
+    - type: toggle_card
       properties:
         title: Dark Mode
         icon: weather-clear-night-symbolic
-        description: Enable/Disable Dark Mode
         key: dusky_theme/state
         key_inverse: true
         save_as_int: true
@@ -725,105 +802,147 @@ pages:
           type: exec
           command: $HOME/user_scripts/theme_matugen/theme_ctl.sh set --mode light
           terminal: false
-    - type: button
+    - type: grid_card
       properties:
-        title: Regenerate Color Files
-        description: Refresh Matugen for current wallpaper
-        icon: view-refresh-symbolic
-        button_text: "Refresh"
+        title: Presets
+        icon: style-symbolic
       on_press:
         type: exec
-        command: $HOME/user_scripts/theme_matugen/theme_ctl.sh refresh
+        command: kitty --class dusky_matugen_presets.sh -e ~/user_scripts/theme_matugen/dusky_matugen_presets.sh
         terminal: false
-    - type: button
+    - type: toggle_card
       properties:
-        title: Fine Tune
-        description: Open Rofi theme configuration
-        icon: emblem-photos-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/rofi/rofi_theme.sh
-        terminal: false
-  - type: section
-    properties:
-      title: Wallpaper
-      icon: ''
-      description: ''
-    items:
-    - type: button
-      properties:
-        title: Waypaper
-        description: GUI Wallpaper Picker
-        icon: image-x-generic-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: waypaper
-        terminal: false
-    - type: button
-      properties:
-        title: Rofi Wallpaper
-        description: Quick Select Menu
-        icon: image-x-generic-symbolic
-        button_text: "Select"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/rofi/rofi_wallpaper_selctor.sh
-        terminal: false
-  - type: section
-    properties:
-      title: Hyprland Eye Candy
-      icon: ''
-      description: ''
-    items:
-    - type: button
-      properties:
-        title: Dusky Appearance TUI
-        description: Configure borders, gaps, colors
-        icon: preferences-desktop-display-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: kitty --class dusky_appearances.sh
-          --hold sh -c "$HOME/user_scripts/hypr/dusky_appearances.sh"
-        terminal: false
-    - type: button
-      properties:
-        title: Animation Presets
-        description: Select Hyprland window animation style
-        icon: media-playlist-shuffle-symbolic
-        button_text: "Select"
-      on_press:
-        type: exec
-        command: rofi -show animations -modi "animations:$HOME/user_scripts/rofi/hypr_anim.sh"
-        terminal: false
-    - type: button
-      properties:
-        title: Toggle Blur/Opacity
-        description: Quick toggle for window effects
+        title: Blur
         icon: view-reveal-symbolic
-        button_text: "Toggle"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/hypr/hypr_blur_opacity_shadow_toggle.sh
-        terminal: false
+        key: opacity_blur
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/hypr/hypr_blur_opacity_shadow_toggle.sh
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/hypr/hypr_blur_opacity_shadow_toggle.sh
+          terminal: false
+
   - type: section
     properties:
-      title: Shaders
+      title: Visual Configuration
       icon: ''
       description: ''
     items:
-    - type: button
+    - type: navigation
       properties:
-        title: Shaders
-        description: Screen effects menu
-        icon: applications-graphics-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/rofi/shader_menu.sh
-        terminal: false
+        title: Theme & Colors
+        description: Color schemes and generation
+        icon: palette-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Theme Management
+          items:
+            - type: button
+              properties:
+                title: Cycle Theme
+                description: Randomize colors from wallpaper
+                icon: palette-symbolic
+              on_press:
+                type: exec
+                command: $HOME/user_scripts/theme_matugen/theme_ctl.sh random
+                terminal: false
+            - type: button
+              properties:
+                title: Regenerate Color Files
+                description: Refresh Matugen for current wallpaper
+                icon: view-refresh-symbolic
+                button_text: "Refresh"
+              on_press:
+                type: exec
+                command: $HOME/user_scripts/theme_matugen/theme_ctl.sh refresh
+                terminal: false
+            - type: button
+              properties:
+                title: Fine Tune
+                description: Open Rofi theme configuration
+                icon: emblem-photos-symbolic
+                button_text: "Open"
+              on_press:
+                type: exec
+                command: $HOME/user_scripts/rofi/rofi_theme.sh
+                terminal: false
+
+    - type: navigation
+      properties:
+        title: Wallpaper
+        description: Background image settings
+        icon: image-x-generic-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Wallpaper Management
+          items:
+            - type: button
+              properties:
+                title: Waypaper
+                description: GUI Wallpaper Picker
+                icon: image-x-generic-symbolic
+                button_text: "Open"
+              on_press:
+                type: exec
+                command: waypaper
+                terminal: false
+            - type: button
+              properties:
+                title: Rofi Wallpaper
+                description: Quick Select Menu
+                icon: image-x-generic-symbolic
+                button_text: "Select"
+              on_press:
+                type: exec
+                command: $HOME/user_scripts/rofi/rofi_wallpaper_selctor.sh
+                terminal: false
+
+    - type: navigation
+      properties:
+        title: Effects & Decorations
+        description: Animations, blur, borders, and shaders
+        icon: preferences-desktop-display-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Hyprland Appearance
+          items:
+            - type: button
+              properties:
+                title: Dusky Appearance TUI
+                description: Configure borders, gaps, colors
+                icon: preferences-desktop-display-symbolic
+                button_text: "Open"
+              on_press:
+                type: exec
+                command: kitty --class dusky_appearances.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_appearances.sh"
+                terminal: false
+            - type: button
+              properties:
+                title: Animation Presets
+                description: Select Hyprland window animation style
+                icon: media-playlist-shuffle-symbolic
+                button_text: "Select"
+              on_press:
+                type: exec
+                command: rofi -show animations -modi "animations:$HOME/user_scripts/rofi/hypr_anim.sh"
+                terminal: false
+            - type: button
+              properties:
+                title: Shaders
+                description: Screen effects menu
+                icon: applications-graphics-symbolic
+                button_text: "Open"
+              on_press:
+                type: exec
+                command: $HOME/user_scripts/rofi/shader_menu.sh
+                terminal: false
+
 - id: components
   title: Components
   icon: emblem-system-symbolic
@@ -844,6 +963,18 @@ pages:
         type: exec
         command: kitty --class mouse_button_reverse.sh --hold sh -c $HOME/user_scripts/desktop_apps/clipboard_persistance.sh
         terminal: false
+    - type: selection
+      properties:
+        title: Clipboard Style
+        icon: edit-paste-symbolic
+        options:
+        - Terminal
+        - Rofi
+        value_command: "grep -q 'True' ~/.config/dusky/settings/clipboard_state 2>/dev/null && echo 'Terminal' || echo 'Rofi'"
+        interval: 5
+      on_change:
+        type: exec
+        command: "$HOME/user_scripts/desktop_apps/switch_clipboard.sh --$(echo '{value}' | tr '[:upper:]' '[:lower:]')"
   - type: section
     properties:
       title: Status Bar & Notifications
@@ -852,7 +983,7 @@ pages:
     items:
     - type: button
       properties:
-        title: Waybar Swap
+        title: Dusky Waybar Select
         description: Choose Status Bar Style
         icon: view-more-symbolic
         button_text: "Swap"
@@ -862,7 +993,7 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: SwayNC Position
+        title: SwayNC Side Switch
         description: Toggle notification center side
         icon: preferences-system-notifications-symbolic
         button_text: "Switch"
@@ -906,6 +1037,7 @@ pages:
         type: exec
         command: $HOME/user_scripts/waybar/toggle_hypridle.sh
         terminal: false
+
 - id: services
   title: Services
   icon: system-run-symbolic
@@ -937,141 +1069,524 @@ pages:
         type: exec
         command: kitty --class performance.sh --hold sh -c "$HOME/user_scripts/performance/services_and_process_terminator.sh"
         terminal: false
+
 - id: configs
   title: Configs
   icon: emblem-documents-symbolic
   layout:
   - type: section
     properties:
-      title: User Customizations (Edit Here)
+      title: Core Configuration
       icon: ''
-      description: ''
+      description: Main system settings
     items:
-    - type: button
+    - type: navigation
       properties:
-        title: Main Config
-        description: Edit hyprland.conf (User Override)
+        title: User Customizations
+        description: Main Hyprland config
         icon: preferences-desktop-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/hyprland.conf"
-        terminal: false
-    - type: button
+      layout:
+        - type: section
+          properties:
+            title: User Customizations
+            description: "Edit hyprland.conf"
+          items:
+            - type: button
+              properties:
+                title: Main Config
+                description: Edit hyprland.conf (User Override)
+                icon: preferences-desktop-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/edit_here/hyprland.conf"
+                terminal: false
+
+    - type: navigation
       properties:
-        title: Keybinds Source
-        description: Edit custom keybindings source file
+        title: Keybinds & Input
+        description: Keyboard shortcuts and input devices
         icon: input-keyboard-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/keybinds.conf"
-        terminal: false
-    - type: button
+      layout:
+        - type: section
+          properties:
+            title: Keybinds & Input
+          items:
+            - type: button
+              properties:
+                title: Keybinds
+                description: Edit custom keybindings
+                icon: input-keyboard-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/keybinds.conf"
+                  - icon: input-keyboard-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_keybinds.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_keybinds.sh"
+            - type: button
+              properties:
+                title: Input
+                description: Edit input configuration
+                icon: input-mouse-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/input.conf"
+                  - icon: input-mouse-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_input.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_input.sh"
+
+    - type: navigation
       properties:
         title: Environment Variables
-        description: Edit environment variables source file
+        description: UWSM and Hyprland environment settings
         icon: text-x-script-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/environment_variables.conf"
-        terminal: false
-    - type: button
+      layout:
+        - type: section
+          properties:
+            title: Environment Variables
+          items:
+            - type: button
+              properties:
+                title: User Environment
+                description: ~/.config/hypr/edit_here/source/environment_variables.conf
+                icon: text-x-script-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/environment_variables.conf"
+            - type: button
+              properties:
+                title: UWSM Global
+                description: ~/.config/uwsm/env
+                icon: text-x-script-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/uwsm/env"
+            - type: button
+              properties:
+                title: UWSM Hyprland
+                description: ~/.config/uwsm/env-hyprland
+                icon: text-x-script-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/uwsm/env-hyprland"
+            - type: button
+              properties:
+                title: Auto Configure GPU
+                description: Detect and set GPU vars (UWSM)
+                icon: preferences-desktop-display-symbolic
+                style: suggested
+                button_text: "Run"
+              on_press:
+                type: exec
+                command: kitty --class 000_configure_uwsm_gpu.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/scripts/000_configure_uwsm_gpu.sh"
+            - type: button
+              properties:
+                title: Disable GPU Vars
+                description: Comment out all GPU variables
+                icon: edit-delete-symbolic
+                style: destructive
+                button_text: "Run"
+              on_press:
+                type: exec
+                command: kitty --class 000_uwsm_env_comment.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/scripts/000_uwsm_env_comment.sh"
+
+    - type: navigation
       properties:
-        title: Monitors
-        description: Edit monitor configuration source file
-        icon: video-display-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/monitors.conf"
-        terminal: false
-    - type: button
+        title: Window Management
+        description: Monitors, Window Rules
+        icon: view-dual-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Window Management
+          items:
+            - type: button
+              properties:
+                title: Monitors
+                description: Edit monitor configuration
+                icon: video-display-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/monitors.conf"
+                  - icon: video-display-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_monitor.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_monitor.sh"
+            - type: button
+              properties:
+                title: Window Rules
+                description: Edit window rules
+                icon: application-x-addon-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/window_rules.conf"
+                  - icon: application-x-addon-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_window_rules.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_window_rules.sh"
+
+    - type: navigation
       properties:
-        title: Window Rules
-        description: Edit window rules source file
-        icon: application-x-addon-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/window_rules.conf"
-        terminal: false
-    - type: button
-      properties:
-        title: Appearance
-        description: Edit visual settings source file
+        title: Visuals & Idle
+        description: Appearance and Hypridle
         icon: applications-graphics-symbolic
-        button_text: "Open"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/appearance.conf"
-        terminal: false
+      layout:
+        - type: section
+          properties:
+            title: Visuals & Idle
+          items:
+            - type: button
+              properties:
+                title: Appearance
+                description: Edit visual settings
+                icon: applications-graphics-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/appearance.conf"
+                  - icon: applications-graphics-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_appearances.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_appearances.sh"
+            - type: button
+              properties:
+                title: Hypridle
+                description: Edit idle daemon config
+                icon: preferences-system-time-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/hypridle.conf"
+                  - icon: preferences-system-time-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_hypridle.sh --hold sh -c "$HOME/user_scripts/hypridle/dusky_hypridle.sh"
+
   - type: section
     properties:
-      title: Dusky Default Hyprland Configuration
+      title: Component Configs
       icon: ''
-      description: ''
+      description: Specific component settings
     items:
-    - type: warning_banner
+    - type: navigation
       properties:
-        title: "WARNING: READ ONLY"
-        message: These are system defaults. Do not edit directly.
+        title: Status Bar (Waybar)
+        description: Configure Waybar layout and style
+        icon: view-more-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Waybar Management
+          items:
+            - type: button
+              properties:
+                title: Dusky Waybar Select
+                description: Launch TUI to swap configs (Preview)
+                icon: view-more-symbolic
+                button_text: "Swap"
+              on_press:
+                type: exec
+                command: kitty --class dusky_waybars.sh --hold sh -c $HOME/user_scripts/waybar/dusky_waybars.sh
+                terminal: false
+            - type: selection
+              properties:
+                title: Active Waybar
+                description: Current theme
+                icon: preferences-system-symbolic
+                options_command: "find $HOME/.config/waybar -maxdepth 1 -type d -not -name '.*' -printf '%f\n' | sort"
+                value_command: "readlink -f $HOME/.config/waybar/config.jsonc | xargs dirname | xargs basename"
+                interval: 5
+              on_change:
+                type: exec
+                command: "ln -sf $HOME/.config/waybar/{value}/config.jsonc $HOME/.config/waybar/config.jsonc; ln -sf $HOME/.config/waybar/{value}/style.css $HOME/.config/waybar/style.css; killall -SIGUSR2 waybar"
+
+        - type: section
+          properties:
+            title: Available Themes
+            description: Located in ~/.config/waybar/
+          items:
+            - type: directory_generator
+              properties:
+                path: ~/.config/waybar
+                sort: name
+              item_template:
+                type: expander
+                properties:
+                  title: "{name_pretty}"
+                  description: "{name}"
+                  icon: folder-symbolic
+                items:
+                  - type: button
+                    properties:
+                      title: Config
+                      description: config.jsonc
+                      icon: preferences-system-symbolic
+                      button_text: "Edit"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "{path}/config.jsonc"
+                      terminal: false
+                  - type: button
+                    properties:
+                      title: Style
+                      description: style.css
+                      icon: text-x-script-symbolic
+                      button_text: "Edit"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "{path}/style.css"
+                      terminal: false
+
+    - type: navigation
+      properties:
+        title: Notifications (SwayNC)
+        description: Configure notification center
+        icon: preferences-system-notifications-symbolic
+      layout:
+        - type: section
+          properties:
+            title: SwayNC Configs
+          items:
+            - type: button
+              properties:
+                title: SwayNC Side Switch
+                description: Toggle notification center side
+                icon: preferences-system-notifications-symbolic
+                button_text: "Switch"
+              on_press:
+                type: exec
+                command: kitty --class dusky_swaync_side.sh --hold sh -c $HOME/user_scripts/swaync/dusky_swaync_side.sh
+                terminal: false
+            - type: button
+              properties:
+                title: Active SwayNC
+                description: Edit Current Configuration
+                icon: preferences-system-symbolic
+                buttons:
+                  - icon: preferences-system-symbolic
+                    button_text: "Config"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/swaync/config.json"
+                  - icon: text-x-script-symbolic
+                    button_text: "Style"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/swaync/style.css"
+
+        - type: section
+          properties:
+            title: Available Themes
+            description: Located in ~/.config/swaync/themes/
+          items:
+            - type: directory_generator
+              properties:
+                path: ~/.config/swaync/themes
+                sort: name
+              item_template:
+                type: expander
+                properties:
+                  title: "{name_pretty}"
+                  description: "{name}"
+                  icon: folder-symbolic
+                items:
+                  - type: button
+                    properties:
+                      title: Config
+                      description: config.json
+                      icon: preferences-system-symbolic
+                      button_text: "Edit"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "{path}/config.json"
+                      terminal: false
+                  - type: button
+                    properties:
+                      title: Style
+                      description: style.css
+                      icon: text-x-script-symbolic
+                      button_text: "Edit"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "{path}/style.css"
+                      terminal: false
+
+    - type: navigation
+      properties:
+        title: Theming (Matugen)
+        description: Material You theme generation config
+        icon: palette-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Matugen Config
+          items:
+            - type: button
+              properties:
+                title: Matugen Config.toml
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/matugen/config.toml"
+
+    - type: navigation
+      properties:
+        title: Hyprlock Themes
+        description: Manage installed Hyprlock themes
+        icon: system-lock-screen-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Hyprlock Management
+          items:
+            - type: button
+              properties:
+                title: Dusky Hyprlock Select
+                description: Swap Lock Screen Layout (TUI)
+                icon: system-lock-screen-symbolic
+                button_text: "Swap"
+              on_press:
+                type: exec
+                command: kitty --class dusky_hyprlock_switcher.sh --hold sh -c $HOME/user_scripts/hyprlock/dusky_hyprlock_switcher.sh
+                terminal: false
+
+        - type: section
+          properties:
+            title: Available Themes
+            description: Located in ~/.config/hypr/hyprlock_themes/
+          items:
+            - type: directory_generator
+              properties:
+                path: ~/.config/hypr/hyprlock_themes
+                sort: name
+              item_template:
+                type: expander
+                properties:
+                  title: "{name_pretty}"
+                  description: "{name}"
+                  icon: folder-symbolic
+                items:
+                  - type: button
+                    properties:
+                      title: Config
+                      description: hyprlock.conf
+                      icon: preferences-system-symbolic
+                      button_text: "Edit"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "{path}/hyprlock.conf"
+                      terminal: false
+                  - type: button
+                    properties:
+                      title: Theme Data
+                      description: theme.json
+                      icon: text-x-script-symbolic
+                      button_text: "Edit"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "{path}/theme.json"
+                      terminal: false
+
+  - type: section
+    properties:
+      title: Reference
+      icon: ''
+      description: System defaults
+    items:
+    - type: navigation
+      properties:
+        title: System Defaults (Read Only)
+        description: View default configuration files
         icon: dialog-warning-symbolic
-      on_press:
-        type: exec
-        command: 'true'
-        terminal: false
-    - type: button
-      properties:
-        title: View Default Hyprland.conf
-        description: View the core system configuration
-        icon: text-x-generic-symbolic
-        button_text: "View"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/hyprland.conf"
-        terminal: false
-    - type: button
-      properties:
-        title: View Default Appearance
-        description: View system visual settings
-        icon: applications-graphics-symbolic
-        button_text: "View"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/source/appearance.conf"
-        terminal: false
-    - type: button
-      properties:
-        title: View Default Autostart
-        description: View system startup applications
-        icon: system-run-symbolic
-        button_text: "View"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/source/autostart.conf"
-        terminal: false
-    - type: button
-      properties:
-        title: View Default Keybinds
-        description: View system keybindings
-        icon: input-keyboard-symbolic
-        button_text: "View"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/source/keybinds.conf"
-        terminal: false
-    - type: button
-      properties:
-        title: View Default Window Rules
-        description: View system window rules
-        icon: application-x-addon-symbolic
-        button_text: "View"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/source/window_rules.conf"
-        terminal: false
+      layout:
+        - type: section
+          properties:
+            title: Dusky Default Hyprland
+            description: "WARNING: Read Only - System Defaults"
+          items:
+            - type: button
+              properties:
+                title: Hyprland.conf
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/hyprland.conf"
+            - type: button
+              properties:
+                title: Environment Variables
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/environment_variables.conf"
+            - type: button
+              properties:
+                title: Appearance
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/appearance.conf"
+            - type: button
+              properties:
+                title: Autostart
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/autostart.conf"
+            - type: button
+              properties:
+                title: Keybinds
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/keybinds.conf"
+            - type: button
+              properties:
+                title: Window Rules
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/window_rules.conf"
+            - type: button
+              properties:
+                title: Input
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/input.conf"
+
 - id: keybinds
   title: Keybinds
   icon: input-keyboard-symbolic
@@ -1103,6 +1618,7 @@ pages:
         command: kitty --class dusky_keybinds.sh --hold
           sh -c "$HOME/user_scripts/hypr/dusky_keybinds.sh"
         terminal: false
+
 - id: tools_and_ai
   title: Tools & AI
   icon: utilities-terminal-symbolic
@@ -1221,6 +1737,7 @@ pages:
     properties:
       title: About Dusky
       description: Version and details about Dusky System
+      icon: ''
     items:
     - type: label
       properties:
@@ -1239,6 +1756,7 @@ pages:
     properties:
       title: System Information
       description: Key details about your system
+      icon: ''
     items:
     - type: label
       properties:

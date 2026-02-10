@@ -55,6 +55,7 @@ readonly USER_SED_SAFE="${CURRENT_USER//\//\\/}"
 #    Comment out lines (using #) to exclude specific files from processing.
 # ------------------------------------------------------------------------------
 readonly TARGET_FILES=(
+    "airmon_ng.desktop"
     "asus_control.desktop"
     "btrfs_compression_stats.desktop"
     "brightness_slider.desktop"
@@ -69,6 +70,7 @@ readonly TARGET_FILES=(
     "dusky_input.desktop"
     "dusky_keybinds.desktop"
     "dusky_monitor.desktop"
+    "dusky_matugen_presets.desktop"
     "dusky_power.desktop"
     "dusky_waybars.desktop"
     "dusky_window_rules.desktop"
@@ -104,7 +106,6 @@ readonly TARGET_FILES=(
     "update_dusky.desktop"
     "warp.desktop"
     "wayclick.desktop"
-    "wifi_security.desktop"
 )
 
 # ------------------------------------------------------------------------------
